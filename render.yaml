@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: casos-mario
+    runtime: python
+    plan: starter
+    region: oregon
+    buildCommand: pip install --disable-pip-version-check -r requirements.txt
+    startCommand: gunicorn --bind 0.0.0.0:$PORT --workers 1 --threads 4 --timeout 120 --graceful-timeout 30 --access-logfile - --error-logfile - app:app
+    healthCheckPath: /api/health
+    autoDeployTrigger: "off"
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.14
+      - key: DATABASE
+        value: /var/data/cases.sqlite3
+      - key: COOKIE_SECURE
+        value: "true"
+      - key: TRUST_PROXY
+        value: "true"
+    disk:
+      name: casos-mario-data
+      mountPath: /var/data
+      sizeGB: 1

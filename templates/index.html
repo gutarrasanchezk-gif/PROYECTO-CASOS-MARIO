@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#182e37">
+  <meta name="description" content="Espacio compartido de casos, actuados y tareas de Mario.">
+  <title>Mario · Casos</title>
+  <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <script defer src="{{ url_for('static', filename='app.js') }}"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Ir al contenido</a>
+  <aside class="sidebar" aria-label="Navegación principal">
+    <a class="brand" href="#resumen" aria-label="Mario Casos, inicio"><span class="brand-mark" aria-hidden="true">M<span>·</span></span><span>Mario <span class="brand-light">/ Casos</span></span></a>
+    <div class="sidebar-caption">ESPACIO DE TRABAJO</div>
+    <nav class="nav-list">
+      <button class="nav-item active" data-view="resumen" aria-current="page"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>Resumen</button>
+      <button class="nav-item" data-view="casos"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/></svg>Casos<span class="nav-count" id="nav-case-count">—</span></button>
+      <button class="nav-item" data-view="pendientes"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="17" rx="2"/><path d="M8 3v3m8-3v3M8 12l2 2 5-5"/></svg>Pendientes<span class="nav-count" id="nav-task-count">—</span></button>
+    </nav>
+    <div class="sidebar-bottom"><span class="connection-dot" id="connection-dot" aria-hidden="true"></span><span id="connection-label">Conectando…</span><p>Un mismo espacio.<br>Todos los casos al día.</p></div>
+  </aside>
+  <div class="workspace">
+    <header class="topbar">
+      <div class="topbar-label">Seguimiento de casos <span>/</span> <strong id="breadcrumb">Resumen</strong></div>
+      <button class="actor-button" id="actor-button"><span class="avatar" id="actor-initial" aria-hidden="true">?</span><span><small>REGISTRAS COMO</small><span id="actor-name">Indicar mi nombre</span></span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg></button>
+    </header>
+    <main id="main" tabindex="-1">
+      <div class="page-heading"><div><p class="eyebrow" id="page-eyebrow">TU ESPACIO COMPARTIDO</p><h1 id="page-title">Todo, en un solo lugar.</h1><p class="page-subtitle" id="page-subtitle">Casos, actuaciones y próximos pasos de Mario.</p></div><div class="heading-actions"><button class="button secondary" id="import-button">Importar Excel</button><button class="button primary" id="new-case-button"><span aria-hidden="true">+</span> Nuevo caso</button></div></div>
+      <section class="sharing-strip" aria-label="Acceso compartido"><span class="sharing-icon" aria-hidden="true">↗</span><p><strong>Trabajamos juntos.</strong> Quien tenga el enlace puede consultar y registrar cambios. Indica tu nombre para dejar constancia.</p><button class="text-button" id="copy-link-button">Copiar enlace</button></section>
+      <div id="status-message" class="status-message" role="status" aria-live="polite" hidden></div>
+      <div id="loading-state" class="loading-state" role="status"><div class="spinner" aria-hidden="true"></div><p>Cargando tu espacio de trabajo…</p></div>
+      <div id="error-state" class="empty-state" role="alert" hidden><div class="empty-icon" aria-hidden="true">!</div><h2>No pudimos cargar los casos</h2><p id="load-error-text">Comprueba tu conexión e inténtalo de nuevo.</p><button class="button primary" id="retry-button">Volver a intentar</button></div>
+      <div id="content" hidden>
+        <section id="summary-view" aria-label="Resumen">
+          <div class="stats-grid" id="stats-grid"></div>
+          <div class="dashboard-grid"><section class="panel"><div class="panel-heading"><div><p class="eyebrow">LO QUE SIGUE</p><h2>Próximas tareas</h2></div><button class="text-button" data-go="pendientes">Ver todas <span aria-hidden="true">→</span></button></div><div id="dashboard-tasks"></div><div class="panel-footer"><button class="text-button" data-new-task>+ Agregar tarea pendiente</button></div></section><section class="panel"><div class="panel-heading"><div><p class="eyebrow">EN SEGUIMIENTO</p><h2>Casos recientes</h2></div><button class="text-button" data-go="casos">Ver todos <span aria-hidden="true">→</span></button></div><div id="dashboard-cases"></div></section></div>
+          <div class="data-footnote" id="import-note"></div>
+        </section>
+        <section id="cases-view" aria-label="Lista de casos" hidden>
+          <div class="toolbar"><div class="search-field"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></svg><label class="sr-only" for="case-search">Buscar por nombre, número A o referencia</label><input id="case-search" type="search" placeholder="Buscar nombre, número A o referencia…" autocomplete="off"></div><div class="toolbar-filters"><label class="sr-only" for="case-status">Estado del caso</label><select id="case-status"><option value="">Todos los estados</option><option value="activo">Activos</option><option value="cerrado">Cerrados</option></select><label class="sr-only" for="case-category">Categoría del caso</label><select id="case-category"><option value="">Todas las categorías</option></select><a class="button secondary export-button" href="/api/export/cases.csv">Exportar CSV <span aria-hidden="true">↓</span></a></div></div>
+          <section class="panel"><div class="list-heading"><h2>Todos los casos <span class="count-chip" id="case-results-count">0</span></h2><span class="muted small">Selecciona un caso para ver sus actuados</span></div><div class="table-wrap"><table class="cases-table"><thead><tr><th scope="col">CASO / CLIENTE</th><th scope="col">NÚMERO A</th><th scope="col">CATEGORÍA</th><th scope="col">PAÍS</th><th scope="col">ESTADO</th><th scope="col">PENDIENTES</th><th scope="col"><span class="sr-only">Abrir caso</span></th></tr></thead><tbody id="cases-table-body"></tbody></table></div><div id="cases-empty" class="empty-state compact" hidden><div class="empty-icon" aria-hidden="true">⌕</div><h3>No encontramos casos</h3><p>Prueba otra búsqueda o registra un nuevo caso.</p></div></section>
+        </section>
+        <section id="tasks-view" aria-label="Tareas pendientes" hidden>
+          <div class="toolbar"><div class="search-field"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></svg><label class="sr-only" for="task-search">Buscar tareas</label><input id="task-search" type="search" placeholder="Buscar tarea, caso o responsable…" autocomplete="off"></div><div class="toolbar-filters"><label class="sr-only" for="task-status">Estado de tarea</label><select id="task-status"><option value="abiertas">Todas las pendientes</option><option value="pendiente">Por hacer</option><option value="en_curso">En curso</option><option value="completada">Completadas</option><option value="">Todos los estados</option></select><label class="sr-only" for="task-priority">Prioridad</label><select id="task-priority"><option value="">Toda prioridad</option><option value="alta">Alta</option><option value="media">Media</option><option value="baja">Baja</option></select><a class="button secondary export-button" href="/api/export/tasks.csv">Exportar CSV <span aria-hidden="true">↓</span></a><button class="button primary" data-new-task>+ Nueva tarea</button></div></div><div class="list-heading task-list-heading"><h2>Tareas del equipo <span class="count-chip" id="task-results-count">0</span></h2><span class="muted small">Ordenadas por fecha límite</span></div><div id="task-list" class="task-list"></div><div id="tasks-empty" class="empty-state" hidden><div class="empty-icon" aria-hidden="true">✓</div><h3>Todo en orden por aquí</h3><p>No hay tareas con estos filtros. Puedes agregar el próximo paso.</p><button class="button secondary" data-new-task>Agregar una tarea</button></div>
+        </section>
+      </div>
+      <footer class="main-footer"><span>Mario · Casos</span><span id="sync-time">Actualización automática cada 30 segundos</span></footer>
+    </main>
+  </div>
+  <dialog id="case-dialog" class="case-dialog" aria-labelledby="case-dialog-title"><div class="dialog-topline"><span class="eyebrow">EXPEDIENTE COMPARTIDO</span><button class="icon-button" data-close="case-dialog" aria-label="Cerrar detalle del caso">×</button></div><div id="case-detail"></div></dialog>
+  <dialog id="form-dialog" class="form-dialog" aria-labelledby="form-dialog-title"><div class="form-dialog-header"><div><p class="eyebrow" id="form-dialog-eyebrow">REGISTRO DEL EQUIPO</p><h2 id="form-dialog-title"></h2></div><button class="icon-button" data-close="form-dialog" aria-label="Cerrar formulario">×</button></div><div id="form-dialog-body"></div></dialog>
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+</body>
+</html>
