@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Instalar la intranet · Mario Casos</title>
+  <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='setup-guide.css') }}">
+</head>
+<body>
+  <header><a href="{{ url_for('index') }}">Mario / Casos</a><span>Guía de instalación</span></header>
+  <main>
+    <p class="eyebrow">INTRANET PRIVADA</p>
+    <h1>Prepara el acceso del equipo.</h1>
+    <p class="intro">La primera cuenta administradora se crea desde la consola del servidor. Después podrás gestionar los usuarios desde el programa.</p>
+    <section>
+      <h2>Si el programa ya está instalado</h2>
+      <ol>
+        <li>Abre la consola de tu hosting y entra en la carpeta del programa.</li>
+        <li>Ejecuta este comando con el entorno de Python de tu instalación:<pre><code>.venv/bin/flask --app app create-admin --username mario --name "Mario Portugal"</code></pre></li>
+        <li>Escribe y confirma una contraseña de al menos 10 caracteres cuando la consola la solicite. La contraseña se introduce de forma oculta.</li>
+        <li>Recarga el programa en el panel del hosting y entra con el usuario que creaste.</li>
+      </ol>
+      <p>El programa no tiene una contraseña predeterminada ni permite registrar públicamente la primera cuenta. En Docker, usa la consola del contenedor indicada en la guía completa.</p>
+    </section>
+    <section>
+      <h2>Si todavía no tienes hosting</h2>
+      <p>Puedes comenzar con una cuenta de <a href="https://www.pythonanywhere.com/" target="_blank" rel="noopener noreferrer">PythonAnywhere</a>, que ofrece un plan gratuito con límites de uso. La guía completa explica cómo subir el ZIP, instalar las dependencias y activar el sitio.</p>
+      <p>Para otro proveedor, elige un hosting que permita <strong>Python 3.10 o superior y aplicaciones WSGI</strong>. En cPanel, busca la opción <strong>Setup Python App</strong> o su equivalente. Un servicio que solo ejecute PHP o archivos HTML necesita otra implementación.</p>
+      <p>Instala el programa en la raíz de un subdominio, activa HTTPS y conserva la base de datos en almacenamiento permanente fuera de la carpeta de archivos públicos.</p>
+    </section>
+    <section>
+      <h2>Después de entrar</h2>
+      <ol>
+        <li>Usa <strong>Importar Excel</strong> para cargar los casos.</li>
+        <li>Abre <strong>Usuarios</strong> y crea las cuentas del equipo. Los colaboradores consultan los casos y registran actuaciones y tareas; los administradores también gestionan las cuentas.</li>
+        <li>Comparte la dirección HTTPS que te entregue el hosting. Cada persona entrará con su propio usuario y contraseña.</li>
+      </ol>
+      <p>Los nuevos registros muestran el nombre de la cuenta que los realizó. Los datos y autores históricos del Excel se conservan.</p>
+    </section>
+    <div class="actions">
+      <a class="primary" href="https://github.com/gutarrasanchezk-gif/PROYECTO-CASOS-MARIO/blob/codex/casos-mario-descarga/README.md" target="_blank" rel="noopener noreferrer">Ver guía completa de hosting</a>
+      <a href="{{ url_for('index') }}">Volver al acceso</a>
+    </div>
+  </main>
+</body>
+</html>

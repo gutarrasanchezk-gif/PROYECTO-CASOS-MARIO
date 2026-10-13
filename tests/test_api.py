@@ -20,6 +20,7 @@ def app(tmp_path):
             "TESTING": True,
             "SECRET_KEY": "test-only-session-key",
             "DATABASE": str(tmp_path / "cases.sqlite3"),
+            "AUTH_REQUIRED": False,
         }
     )
 

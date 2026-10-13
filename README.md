@@ -1,12 +1,33 @@
 # Casos de Mario
 
-Programa web en español para consultar casos, registrar actuados y organizar tareas pendientes del equipo. Cada registro solicita el nombre de quien lo realiza. Permite buscar casos, asignar tareas, indicar plazos y prioridades, marcar avances, consultar el historial y exportar listados a CSV.
+Intranet en español para consultar casos, registrar actuados y organizar tareas pendientes del equipo. Permite buscar casos, asignar tareas, indicar plazos y prioridades, marcar avances, consultar el historial y exportar listados a CSV. Cada registro identifica automáticamente al usuario que inició sesión.
 
-El acceso es mediante un enlace abierto, sin contraseña, según la preferencia solicitada. Cualquier persona con el enlace puede consultar y modificar información, además de importar archivos. El nombre del autor es declarado por quien escribe; no acredita su identidad. Comparte el enlace teniendo en cuenta que contiene información de clientes. Se puede añadir acceso privado en una siguiente versión.
+El acceso es **privado, con usuario y contraseña**. Los casos, tareas, importaciones y exportaciones requieren iniciar sesión. El enlace por sí solo no permite consultar los datos.
+
+## Acceso y usuarios
+
+Hay dos perfiles:
+
+- **Administrador:** consulta y registra información, importa el Excel, exporta listados y gestiona las cuentas del equipo.
+- **Editor:** consulta todos los casos y registra actuados, cambios y tareas; también puede importar y exportar. No gestiona usuarios.
+
+El administrador puede crear cuentas, cambiar su perfil o nombre, restablecer contraseñas y desactivar el acceso. No se puede desactivar la propia cuenta ni dejar al sistema sin un administrador activo. Desactivar un usuario conserva sus registros anteriores y revoca sus sesiones. Las contraseñas se guardan como hashes dentro de la base privada.
+
+Cada usuario puede cambiar su contraseña desde la aplicación. El cambio invalida sus otras sesiones; un restablecimiento por el administrador invalida las sesiones anteriores. Los registros nuevos toman el nombre de la cuenta autenticada, y los autores históricos permanecen intactos.
+
+### Primer administrador
+
+Una instalación nueva muestra la pantalla de acceso con un aviso de configuración pendiente. No hay contraseña predeterminada ni registro público. Después de instalar las dependencias, crea el primer administrador desde una terminal del servidor:
+
+```bash
+.venv/bin/flask --app app create-admin --username mario --name "Mario Portugal"
+```
+
+La terminal solicita la contraseña y su confirmación sin mostrarlas. El usuario debe tener al menos 3 caracteres y la contraseña al menos 10. Elige tú la contraseña; no la añadas al comando, al código ni a los registros. Crear la cuenta conserva los casos que ya existan en esa base. Los pasos de cada alojamiento indican cómo ejecutar este comando con su entorno y base persistente.
 
 ## Usar el programa
 
-1. Abre el programa y escribe tu nombre al registrar un cambio.
+1. Abre el programa e inicia sesión con la cuenta que te asignó el administrador.
 2. Usa **Importar Excel** para cargar `Clientes_Mario_Portugal.xlsx`. También puedes importar con el comando indicado más abajo. La importación conserva los valores originales de las hojas para consultarlos dentro de cada caso, y no duplica la carga del mismo archivo.
 3. Abre un caso para agregar un actuado, revisar su historial o crear una tarea relacionada.
 4. En **Tareas**, registra también pendientes generales sin asociarlos a un caso. Indica responsable, prioridad y fecha límite cuando corresponda.
@@ -18,6 +39,48 @@ Los datos se guardan en SQLite en el servidor y se comparten entre quienes visit
 ## Ponerlo en línea
 
 El repositorio contiene la aplicación y su configuración de despliegue. No está publicado todavía: la dirección pública la asigna el proveedor al crear el sitio. No necesitas un dominio propio para comenzar.
+
+### Hosting con cPanel y Python/Passenger
+
+Puedes instalar el programa en un hosting que incluya **Setup Python App**, **Application Manager con Python/Passenger** o un servicio equivalente para aplicaciones WSGI, con **Python 3.10 o superior**. Un hosting que ofrece solamente PHP no puede ejecutar esta aplicación; en ese caso, usa un proveedor con Python o un VPS con Docker.
+
+1. Crea un subdominio para el programa y habilita su certificado HTTPS desde el panel del hosting. Configura la aplicación en la raíz de ese subdominio, con **Application URL `/`**. La interfaz usa rutas como `/api/cases`, por lo que no debes montarla en una subcarpeta como `/casos`.
+2. En el administrador de archivos, sube y descomprime el ZIP de la aplicación en `/home/TU_USUARIO/proyecto-casos-mario`, sustituyendo `TU_USUARIO` por tu usuario de hosting. Esta es la **Application root**, fuera de `public_html`. No pongas el Excel, la base de datos, los respaldos ni las claves en directorios públicos.
+3. En **Setup Python App** o el administrador equivalente, crea la aplicación seleccionando Python 3.10 o superior y el subdominio. Indica `proyecto-casos-mario` como raíz, `passenger_wsgi.py` como **Application startup file** y `application` como **Application entry point**. Usa el modo **Production** si el panel permite elegirlo. `passenger_wsgi.py` localiza el proyecto por su propia ruta y respeta las variables que configure el hosting.
+4. Activa el entorno virtual con el comando que muestra el panel. Desde Terminal/SSH, ejecuta:
+
+   ```bash
+   cd /home/TU_USUARIO/proyecto-casos-mario
+   python -m pip install -r requirements.txt
+   ```
+
+   Si no dispones de terminal y el panel ofrece **Run Pip Install**, selecciona `requirements.txt`. El proveedor debe permitir instalar estas dependencias en el entorno Python de la aplicación.
+5. Configura estas variables en el panel de la aplicación:
+
+   | Variable | Valor |
+   | --- | --- |
+   | `DATABASE` | `/home/TU_USUARIO/proyecto-casos-mario/instance/cases.sqlite3` |
+   | `COOKIE_SECURE` | `true`, con el sitio servido mediante HTTPS |
+   | `AUTH_REQUIRED` | `true` |
+
+   El usuario que ejecuta la aplicación debe poder escribir en `instance`; el programa crea ese directorio y la base automáticamente. Deja `TRUST_PROXY` sin definir, salvo que el proveedor confirme que debes confiar en su proxy. La clave de sesiones se genera y conserva junto a la base, sin necesidad de incluirla en el código.
+6. Con el entorno Python activado, crea el administrador usando la misma base configurada para Passenger:
+
+   ```bash
+   cd /home/TU_USUARIO/proyecto-casos-mario
+   DATABASE=/home/TU_USUARIO/proyecto-casos-mario/instance/cases.sqlite3 flask --app app create-admin --username mario --name "Mario Portugal"
+   ```
+
+   Introduce la contraseña cuando la terminal la solicite. Las variables del panel WSGI no siempre se aplican a una terminal; por eso el comando indica explícitamente la base. Si el hosting no ofrece Terminal/SSH, el proveedor debe facilitar un medio privado para ejecutar este comando.
+7. Pulsa **Restart** para iniciar la aplicación. Abre el subdominio mediante HTTPS y comprueba que `/api/health` devuelve `{"status":"ok"}`. Inicia sesión, usa **Importar Excel** para cargar `Clientes_Mario_Portugal.xlsx` y crea las cuentas del equipo. Registra una tarea de prueba y comprueba que aparece desde otro navegador después de iniciar sesión.
+
+Los casos y actuados quedan en la base persistente del hosting. Conserva `instance` al actualizar los archivos del programa. Para respaldarlos, activa el mismo entorno Python y ejecuta, usando un nombre nuevo en cada ocasión:
+
+```bash
+python /home/TU_USUARIO/proyecto-casos-mario/scripts/backup.py /home/TU_USUARIO/proyecto-casos-mario/instance/cases.sqlite3 /home/TU_USUARIO/casos-mario-respaldo.sqlite3
+```
+
+Descarga el archivo desde el administrador de archivos y guárdalo fuera del hosting. La base y sus respaldos contienen también las cuentas del equipo; mantenlos fuera de directorios públicos.
 
 ### Opción gratuita: PythonAnywhere
 
@@ -45,11 +108,20 @@ El repositorio contiene la aplicación y su configuración de despliegue. No est
    sys.path.insert(0, project)
    os.environ["DATABASE"] = project + "/instance/cases.sqlite3"
    os.environ["COOKIE_SECURE"] = "true"
+   os.environ["AUTH_REQUIRED"] = "true"
 
    from app import app as application
    ```
 
-5. Activa HTTPS si el panel ofrece esa opción y recarga el sitio con **Reload**. Abre la dirección HTTPS que muestra PythonAnywhere y utiliza **Importar Excel** para cargar los casos. Comparte esa dirección con el equipo.
+5. Antes de recargar el sitio, crea el administrador desde la consola Bash:
+
+   ```bash
+   cd /home/TU_USUARIO/proyecto-casos-mario
+   DATABASE=/home/TU_USUARIO/proyecto-casos-mario/instance/cases.sqlite3 .venv/bin/flask --app app create-admin --username mario --name "Mario Portugal"
+   ```
+
+   Introduce la contraseña cuando la terminal la solicite; este comando usa la misma base que el archivo WSGI.
+6. Activa HTTPS si el panel ofrece esa opción y recarga el sitio con **Reload**. Abre la dirección HTTPS que muestra PythonAnywhere, inicia sesión y utiliza **Importar Excel** para cargar los casos. Crea las cuentas del equipo y comparte la dirección; cada persona necesitará su cuenta para acceder.
 
 El directorio `instance` conserva la base entre recargas. No lo borres al actualizar el programa. Consulta las instrucciones oficiales de [Flask en PythonAnywhere](https://help.pythonanywhere.com/pages/Flask/).
 
@@ -57,11 +129,18 @@ El directorio `instance` conserva la base entre recargas. No lo borres al actual
 
 `render.yaml` configura un servicio Python con Gunicorn, HTTPS, comprobación de salud y un disco persistente de 1 GB en `/var/data`. **El plan `starter` y el disco son de pago y generan un costo recurrente**; comprueba el importe vigente en Render antes de crear el servicio. El disco es necesario para conservar SQLite entre reinicios y despliegues.
 
-1. Guarda esta versión del proyecto en el repositorio de GitHub que vas a conectar.
-2. En [Render](https://render.com/), crea una cuenta y usa **New → Blueprint** para conectar `gutarrasanchezk-gif/PROYECTO-CASOS-MARIO` en la rama `main`.
-3. Revisa el servicio, el disco y el costo que propone el panel a partir de `render.yaml`, y crea el servicio cuando estés conforme.
-4. Cuando el despliegue termine, abre la dirección HTTPS que asignó Render y usa **Importar Excel** para cargar `Clientes_Mario_Portugal.xlsx`.
-5. Comprueba que `/api/health` responde con `{"status":"ok"}`, registra una tarea de prueba y comprueba que aparece desde otro navegador.
+1. El código de la aplicación está publicado en la rama `codex/casos-mario-descarga` de `gutarrasanchezk-gif/PROYECTO-CASOS-MARIO`. Usa esa rama o una rama donde ya hayas integrado sus cambios; `main` contiene solamente el README inicial mientras no se integren.
+2. En [Render](https://render.com/), crea una cuenta y usa **New → Blueprint** para conectar ese repositorio y selecciona `codex/casos-mario-descarga` o la rama que ya contenga la aplicación y `render.yaml`.
+3. Revisa el servicio, el disco y el costo que propone el panel a partir de `render.yaml`. Comprueba que la rama del servicio también contiene la aplicación, y crea el servicio cuando estés conforme.
+4. Cuando el despliegue termine, abre la terminal **Shell** del servicio y crea el administrador:
+
+   ```bash
+   flask --app app create-admin --username mario --name "Mario Portugal"
+   ```
+
+   La terminal utiliza `DATABASE=/var/data/cases.sqlite3`, definido en el servicio. Introduce la contraseña de forma oculta cuando se solicite. Ejecuta este paso en el servicio en funcionamiento, **después del despliegue**; no lo agregues al comando de construcción, donde el disco persistente no está disponible.
+5. Abre la dirección HTTPS que asignó Render, inicia sesión y usa **Importar Excel** para cargar `Clientes_Mario_Portugal.xlsx`. Crea las cuentas del equipo.
+6. Comprueba que `/api/health` responde con `{"status":"ok"}`, registra una tarea de prueba y comprueba que aparece desde otro navegador después de iniciar sesión.
 
 La base se guarda en `/var/data/cases.sqlite3`. El servicio usa una sola instancia y un proceso Gunicorn con cuatro hilos, adecuado para SQLite y un equipo pequeño. Las actualizaciones se despliegan manualmente desde Render; conservan el disco. No elimines el servicio ni el disco sin descargar antes un respaldo. Documentación oficial: [Blueprints](https://render.com/docs/infrastructure-as-code), [discos persistentes](https://render.com/docs/disks) y [Flask](https://render.com/docs/deploy-flask).
 
@@ -75,7 +154,13 @@ python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements.txt
 ```
 
-Carga el Excel desde el navegador cuando esté abierto el programa, o importa desde la terminal indicando su ruta real:
+Crea el primer administrador:
+
+```bash
+.venv/bin/flask --app app create-admin --username mario --name "Mario Portugal"
+```
+
+Carga el Excel desde el navegador después de iniciar sesión, o importa desde la terminal indicando su ruta real:
 
 ```bash
 .venv/bin/python importer.py /ruta/Clientes_Mario_Portugal.xlsx --database instance/cases.sqlite3
@@ -100,10 +185,11 @@ El servidor de desarrollo de Flask se usa solo en la máquina local. En producci
 ```bash
 docker build -t casos-mario .
 docker volume create casos-mario-data
-docker run --name casos-mario --restart unless-stopped -p 8000:8000 -v casos-mario-data:/app/instance casos-mario
+docker run -d --name casos-mario --restart unless-stopped -p 8000:8000 -v casos-mario-data:/app/instance casos-mario
+docker exec -it casos-mario flask --app app create-admin --username mario --name "Mario Portugal"
 ```
 
-Abre `http://localhost:8000` e importa el Excel desde la interfaz. El volumen conserva la base entre reinicios del contenedor. El proceso ejecuta con el usuario `app`, UID 10001; si usas un directorio del host en lugar del volumen, debe ser escribible por ese usuario. Para publicarlo, configura HTTPS en un proxy y las variables de cookies y proxy indicadas abajo.
+El último comando solicita y confirma la contraseña sin mostrarla. Abre `http://localhost:8000`, inicia sesión e importa el Excel desde la interfaz. El volumen conserva la base y las cuentas entre reinicios del contenedor. El proceso ejecuta con el usuario `app`, UID 10001; si usas un directorio del host en lugar del volumen, debe ser escribible por ese usuario. Para publicarlo, configura HTTPS en un proxy y las variables de cookies y proxy indicadas abajo.
 
 Si tu red usa un proxy HTTPS con una autoridad de confianza propia, Docker admite su certificado durante la instalación con `--secret id=pip_cert,src=/ruta/al/paquete-de-certificados-confiable.pem`. Configura también los argumentos de proxy de Docker según tu red. El certificado se monta temporalmente durante la construcción y no se incorpora a la imagen; la verificación TLS permanece activada.
 
@@ -112,6 +198,7 @@ Si tu red usa un proxy HTTPS con una autoridad de confianza propia, Docker admit
 | Variable | Uso |
 | --- | --- |
 | `DATABASE` | Ruta de SQLite. Por defecto, `instance/cases.sqlite3`; en Render, `/var/data/cases.sqlite3`. |
+| `AUTH_REQUIRED` | `true` por defecto: exige usuarios y contraseña. El modo `false` queda para pruebas de compatibilidad; no lo uses en un alojamiento público. |
 | `COOKIE_SECURE` | `true` en un sitio servido con HTTPS. Déjala desactivada para HTTP local. |
 | `TRUST_PROXY` | `true` cuando el servicio está detrás del proxy de Render. No actives esta opción en un servidor expuesto directamente. |
 | `SECRET_KEY` | Clave opcional de sesiones. Si no se proporciona, la aplicación genera y conserva una clave junto a la base; no hace falta escribirla en el repositorio. |

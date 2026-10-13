@@ -1,7 +1,7 @@
-"""Shared case registry. Open access is an explicit deployment choice."""
+"""Private shared case registry with administrator-managed user access."""
 
 import csv
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 import fcntl
 import io
 import json
@@ -20,6 +20,7 @@ from werkzeug.exceptions import HTTPException
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from storage import connect_db, init_db
+from auth import register_auth
 
 
 CASE_FIELDS = {
@@ -54,7 +55,15 @@ def utc_now():
 
 
 def _env_bool(name, default=False):
-    return os.environ.get(name, str(default)).strip().lower() in {'1', 'true', 'yes'}
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    value = value.strip().lower()
+    if value in {'1', 'true', 'yes'}:
+        return True
+    if value in {'0', 'false', 'no'}:
+        return False
+    return default
 
 
 def _persistent_secret(directory):
@@ -134,6 +143,8 @@ def create_app(config=None):
         MAX_JSON_CONTENT_LENGTH=1024 * 1024,
         TRUST_PROXY=_env_bool('TRUST_PROXY'),
         APP_TIMEZONE='America/Lima',
+        AUTH_REQUIRED=_env_bool('AUTH_REQUIRED', True),
+        PERMANENT_SESSION_LIFETIME=timedelta(hours=8),
     )
     if config:
         app.config.update(config)
@@ -157,6 +168,8 @@ def create_app(config=None):
         if connection is not None:
             connection.close()
 
+    register_auth(app, database, ValidationError, utc_now)
+
     @app.before_request
     def protect_mutations():
         if not request.path.startswith('/api/') or request.method not in {'POST', 'PATCH', 'PUT', 'DELETE'}:
@@ -167,8 +180,8 @@ def create_app(config=None):
             return jsonify(error='La sesión cambió. Recarga la página antes de registrar.'), 403
         origin = request.headers.get('Origin')
         if origin:
-            actual = urlsplit(request.host_url)
             try:
+                actual = urlsplit(request.host_url)
                 supplied = urlsplit(origin)
             except ValueError:
                 return jsonify(error='El origen de la solicitud no está permitido.'), 403
@@ -224,7 +237,7 @@ def create_app(config=None):
         extra = set(data) - allowed - {'author'}
         if extra:
             raise ValidationError('Campos no permitidos: ' + ', '.join(sorted(extra)) + '.')
-        author = _text(data, 'author', required=True, limit=150)
+        author = g.user['name'] if app.config['AUTH_REQUIRED'] else _text(data, 'author', required=True, limit=150)
         if patch and not (set(data) & allowed):
             raise ValidationError('Indica al menos un campo que deseas cambiar.')
         return data, author
@@ -294,6 +307,10 @@ def create_app(config=None):
     @app.get('/')
     def index():
         return render_template('index.html')
+
+    @app.get('/setup-guide')
+    def setup_guide():
+        return render_template('setup_guide.html')
 
     @app.get('/robots.txt')
     def robots():
@@ -459,7 +476,7 @@ def create_app(config=None):
     def import_excel():
         if request.mimetype != 'multipart/form-data':
             return jsonify(error='Selecciona un archivo Excel para importar.'), 415
-        author = _text(request.form, 'author', required=True, limit=150)
+        author = g.user['name'] if app.config['AUTH_REQUIRED'] else _text(request.form, 'author', required=True, limit=150)
         if set(request.form) - {'author'} or set(request.files) - {'file'}:
             raise ValidationError('La importación incluye campos no permitidos.')
         uploaded = request.files.get('file')

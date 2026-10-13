@@ -3,10 +3,9 @@
 (() => {
   const $ = (selector, root = document) => root.querySelector(selector);
   const $$ = (selector, root = document) => Array.from(root.querySelectorAll(selector));
-  const state = { cases: [], tasks: [], stats: {}, csrf: '', loaded: false, loading: false, view: 'resumen', detail: null, detailId: null, detailTab: 'datos', detailRequest: 0, actor: '', submitting: false, taskBusy: new Set() };
+  const state = { cases: [], tasks: [], stats: {}, csrf: '', loaded: false, loading: false, view: 'resumen', detail: null, detailId: null, detailTab: 'datos', detailRequest: 0, actor: '', submitting: false, taskBusy: new Set(), authenticated: false, user: null, users: [], usersLoading: false, authRevision: 0, sessionLoading: false };
   const labels = { activo: 'Activo', cerrado: 'Cerrado', pendiente: 'Por hacer', en_curso: 'En curso', completada: 'Completada', alta: 'Alta', media: 'Media', baja: 'Baja', actuacion: 'Actuación', llamada: 'Llamada', audiencia: 'Audiencia', documento: 'Documento', nota: 'Nota' };
   let toastTimer;
-  let resumeAction = null;
 
   const node = (tag, className, content) => {
     const element = document.createElement(tag);
@@ -64,26 +63,181 @@
   }
 
   async function request(path, options = {}) {
-    const headers = { ...(options.headers || {}) };
-    if (options.method && options.method !== 'GET') {
+    const { responseFormat, ...fetchOptions } = options;
+    const headers = { ...(fetchOptions.headers || {}) };
+    if (fetchOptions.method && fetchOptions.method !== 'GET') {
       headers['X-CSRF-Token'] = state.csrf;
-      if (!(options.body instanceof FormData)) headers['Content-Type'] = 'application/json';
+      if (!(fetchOptions.body instanceof FormData)) headers['Content-Type'] = 'application/json';
     }
     let response;
     try {
-      response = await fetch(path, { ...options, headers, credentials: 'same-origin', cache: 'no-store' });
+      response = await fetch(path, { ...fetchOptions, headers, credentials: 'same-origin', cache: 'no-store' });
     } catch (_) {
       throw new Error('No pudimos conectar con el servidor. Comprueba tu conexión y vuelve a intentar.');
     }
     const contentType = response.headers.get('Content-Type') || '';
     const data = contentType.includes('application/json') ? await response.json() : null;
-    if (!response.ok) throw new Error(data?.error || (response.status === 413 ? 'El archivo es demasiado grande.' : 'No se pudo completar la operación. Vuelve a intentar.'));
+    if (!response.ok) {
+      const error = new Error(data?.error || (response.status === 413 ? 'El archivo es demasiado grande.' : 'No se pudo completar la operación. Vuelve a intentar.'));
+      error.status = response.status;
+      if (response.status === 401) {
+        error.authExpired = true;
+        clearPrivateData();
+        showLogin();
+        if (path !== '/api/auth/session') await loadSession({ loadWorkspace: false });
+        if (path !== '/api/auth/login') {
+          $('#login-error').textContent = 'Tu sesión terminó. Vuelve a iniciar sesión para continuar.';
+          $('#login-error').hidden = false;
+        }
+      }
+      throw error;
+    }
+    if (responseFormat === 'blob') return response.blob();
     if (!data) throw new Error('El servidor no devolvió una respuesta válida. Vuelve a intentar.');
     return data;
   }
 
+  function clearPrivateData() {
+    state.authRevision++;
+    state.authenticated = false;
+    state.user = null;
+    state.actor = '';
+    state.csrf = '';
+    state.cases = [];
+    state.tasks = [];
+    state.users = [];
+    state.stats = {};
+    state.loaded = false;
+    state.loading = false;
+    state.detail = null;
+    state.detailId = null;
+    state.detailRequest++;
+    state.taskBusy.clear();
+    ['case-dialog', 'form-dialog'].forEach(id => { const dialog = document.getElementById(id); if (dialog.open) dialog.close(); });
+    ['case-detail', 'form-dialog-body', 'cases-table-body', 'task-list', 'dashboard-tasks', 'dashboard-cases', 'stats-grid', 'import-note', 'users-table-body', 'users-status', 'toast'].forEach(id => document.getElementById(id).replaceChildren());
+    ['case-search', 'task-search', 'login-password'].forEach(id => { document.getElementById(id).value = ''; });
+    $('#case-category').replaceChildren(new Option('Todas las categorías', ''));
+    ['case-results-count', 'task-results-count', 'user-count'].forEach(id => { document.getElementById(id).textContent = '0'; });
+    $('#content').hidden = true;
+    $('#status-message').hidden = true;
+    $('#toast').hidden = true;
+    $('#users-nav').hidden = true;
+    $('#app-shell').hidden = true;
+    $('#actor-name').textContent = '';
+    $('#actor-initial').textContent = '?';
+    $('#nav-case-count').textContent = '—';
+    $('#nav-task-count').textContent = '—';
+    document.title = 'Acceso · Mario Casos';
+    clearTimeout(toastTimer);
+  }
+
+  function showLogin({ setupRequired = false } = {}) {
+    $('#auth-screen').hidden = false;
+    $('#app-shell').hidden = true;
+    $('#auth-loading').hidden = true;
+    $('#auth-error').hidden = true;
+    $('#auth-setup').hidden = !setupRequired;
+    $('#login-form').hidden = setupRequired;
+    $('#login-password').value = '';
+    $('#auth-title').textContent = setupRequired ? 'Tu espacio está casi listo.' : 'Bienvenido al equipo.';
+    $('.auth-intro').textContent = setupRequired ? 'Falta activar el acceso del equipo.' : 'Inicia sesión para continuar con los casos.';
+    document.title = 'Acceso · Mario Casos';
+  }
+
+  function applySession(session) {
+    if (!session.authenticated || !session.user) {
+      clearPrivateData();
+      state.csrf = session.csrf_token || '';
+      showLogin({ setupRequired: Boolean(session.setup_required) });
+      return false;
+    }
+    state.authRevision++;
+    state.authenticated = true;
+    state.user = session.user;
+    state.actor = session.user.name;
+    state.csrf = session.csrf_token || '';
+    $('#auth-screen').hidden = true;
+    $('#app-shell').hidden = false;
+    $('#users-nav').hidden = session.user.role !== 'admin';
+    updateActor();
+    setView(state.view);
+    return true;
+  }
+
+  async function loadSession({ loadWorkspace = true } = {}) {
+    if (state.sessionLoading) return false;
+    state.sessionLoading = true;
+    if (!state.authenticated) {
+      $('#auth-loading').hidden = false;
+      $('#auth-error').hidden = true;
+      $('#login-form').hidden = true;
+      $('#auth-setup').hidden = true;
+    }
+    try {
+      const session = await request('/api/auth/session');
+      const authenticated = applySession(session);
+      if (authenticated && loadWorkspace) await loadData({ quiet: true });
+      return authenticated;
+    } catch (error) {
+      if (error.authExpired) return false;
+      if (!state.authenticated) {
+        $('#auth-loading').hidden = true;
+        $('#auth-error').hidden = false;
+        $('#auth-error-text').textContent = error.message;
+      } else notify(error.message, true);
+      return false;
+    } finally {
+      state.sessionLoading = false;
+    }
+  }
+
+  async function login(event) {
+    event.preventDefault();
+    const form = $('#login-form');
+    const button = $('#login-submit');
+    if (button.disabled || !form.reportValidity()) return;
+    button.disabled = true;
+    button.textContent = 'Entrando…';
+    $('#login-error').hidden = true;
+    try {
+      const session = await request('/api/auth/login', { method: 'POST', body: JSON.stringify({ username: $('#login-username').value.trim(), password: $('#login-password').value }) });
+      $('#login-password').value = '';
+      if (applySession(session)) {
+        setView(location.hash.slice(1));
+        await loadData();
+        $('#main').focus();
+      }
+    } catch (error) {
+      $('#login-password').value = '';
+      $('#login-error').textContent = error.message;
+      $('#login-error').hidden = false;
+      $('#login-password').focus();
+    } finally {
+      button.disabled = false;
+      button.textContent = 'Entrar al espacio';
+    }
+  }
+
+  async function logout() {
+    const button = $('#logout-button');
+    if (button.disabled) return;
+    button.disabled = true;
+    try {
+      const session = await request('/api/auth/logout', { method: 'POST', body: '{}' });
+      applySession(session);
+      $('#login-username').value = '';
+      $('#login-error').hidden = true;
+      $('#login-username').focus();
+    } catch (error) {
+      if (!error.authExpired) notify(error.message, true);
+    } finally {
+      button.disabled = false;
+    }
+  }
+
   async function loadData({ quiet = false, refreshDetail = true } = {}) {
-    if (state.loading) return false;
+    if (state.loading || !state.authenticated) return false;
+    const revision = state.authRevision;
     state.loading = true;
     if (!state.loaded) {
       $('#loading-state').hidden = false;
@@ -91,6 +245,7 @@
     }
     try {
       const data = await request('/api/bootstrap');
+      if (!state.authenticated || revision !== state.authRevision) return false;
       state.cases = data.cases || [];
       state.tasks = data.tasks || [];
       state.stats = data.stats || {};
@@ -108,6 +263,7 @@
       if (refreshDetail && state.detailId !== null && $('#case-dialog').open && !$('#form-dialog').open) await refreshCase();
       return true;
     } catch (error) {
+      if (error.authExpired || !state.authenticated || revision !== state.authRevision) return false;
       setConnection(false);
       $('#loading-state').hidden = true;
       if (state.loaded) syncWarning('No se han podido actualizar los datos. Estás viendo la última versión recibida.');
@@ -123,17 +279,19 @@
   }
 
   function setView(view) {
-    if (!['resumen', 'casos', 'pendientes'].includes(view)) view = 'resumen';
+    if (!['resumen', 'casos', 'pendientes', 'usuarios'].includes(view)) view = 'resumen';
+    if (view === 'usuarios' && state.user?.role !== 'admin') view = 'resumen';
     state.view = view;
     const headings = {
       resumen: ['TU ESPACIO COMPARTIDO', 'Todo, en un solo lugar.', 'Casos, actuaciones y próximos pasos de Mario.'],
       casos: ['EXPEDIENTES COMPARTIDOS', 'Cada caso, al día.', 'Consulta el expediente y registra cada actuación.'],
-      pendientes: ['PRÓXIMOS PASOS', 'Lo que queda por hacer.', 'Organiza tareas, responsables y fechas límite.']
+      pendientes: ['PRÓXIMOS PASOS', 'Lo que queda por hacer.', 'Organiza tareas, responsables y fechas límite.'],
+      usuarios: ['ADMINISTRACIÓN', 'Las personas del equipo.', 'Gestiona usuarios, permisos y acceso a la intranet.']
     };
     $('#page-eyebrow').textContent = headings[view][0];
     $('#page-title').textContent = headings[view][1];
     $('#page-subtitle').textContent = headings[view][2];
-    $('#breadcrumb').textContent = { resumen: 'Resumen', casos: 'Casos', pendientes: 'Pendientes' }[view];
+    $('#breadcrumb').textContent = { resumen: 'Resumen', casos: 'Casos', pendientes: 'Pendientes', usuarios: 'Usuarios' }[view];
     document.title = `${$('#breadcrumb').textContent} · Mario Casos`;
     $$('.nav-item').forEach(button => {
       button.classList.toggle('active', button.dataset.view === view);
@@ -143,6 +301,9 @@
     $('#summary-view').hidden = view !== 'resumen';
     $('#cases-view').hidden = view !== 'casos';
     $('#tasks-view').hidden = view !== 'pendientes';
+    $('#users-view').hidden = view !== 'usuarios';
+    $('.heading-actions').hidden = view === 'usuarios';
+    if (view === 'usuarios' && state.authenticated) loadUsers();
     if (location.hash !== `#${view}`) history.replaceState(null, '', `#${view}`);
   }
 
@@ -438,15 +599,15 @@
   }
 
   function updateActor() {
-    $('#actor-name').textContent = state.actor || 'Indicar mi nombre';
+    $('#actor-name').textContent = state.user?.name || '';
     $('#actor-initial').textContent = initials(state.actor);
-    $('#actor-button').setAttribute('aria-label', state.actor ? `Registras como ${state.actor}. Cambiar nombre` : 'Indicar tu nombre para registrar cambios');
+    $('#actor-profile').setAttribute('aria-label', `Sesión de ${state.user?.name || ''}`);
   }
 
   function requireActor(action) {
+    if (!state.authenticated || !state.user) { showLogin(); return; }
     if (!state.loaded) { notify('Espera a que se cargue el espacio para registrar cambios.', true); return; }
-    if (state.actor.trim()) action();
-    else { resumeAction = action; openActorForm(); }
+    action();
   }
 
   function field(form, name, label, options = {}) {
@@ -471,6 +632,7 @@
     if (options.value !== undefined && options.type !== 'file') input.value = text(options.value);
     if (options.placeholder) input.placeholder = options.placeholder;
     if (options.maxLength) input.maxLength = options.maxLength;
+    if (options.minLength) input.minLength = options.minLength;
     if (options.autocomplete) input.autocomplete = options.autocomplete;
     wrap.append(labelNode, input);
     if (options.hint) {
@@ -485,7 +647,7 @@
 
   function createForm(title, submitLabel, handler, { intro = '', author = true } = {}) {
     const dialog = $('#form-dialog');
-    if (state.submitting) return null;
+    if (state.submitting || !state.authenticated) return null;
     $('#form-dialog-title').textContent = title;
     const form = node('form', 'form-body');
     if (intro) form.append(node('p', 'form-intro', intro));
@@ -494,12 +656,7 @@
       const row = node('div', 'form-author');
       const label = node('span');
       label.append(document.createTextNode('Registrará: '), node('strong', '', state.actor));
-      row.append(label, actionButton('Cambiar nombre', '', () => {
-        const actorInput = $('#field-author', form);
-        if (actorInput) { actorInput.focus(); return; }
-        const input = field(form, 'author', 'Tu nombre para este registro', { required: true, value: state.actor, full: true, maxLength: 120 });
-        input.focus();
-      }));
+      row.append(label);
       form.append(row);
     }
     const error = node('div', 'form-error');
@@ -515,10 +672,7 @@
       event.preventDefault();
       if (state.submitting || !form.reportValidity()) return;
       const data = Object.fromEntries(new FormData(form).entries());
-      if (author) {
-        data.author = text(data.author || state.actor).trim();
-        if (!data.author) { error.textContent = 'Indica el nombre de quien registra este cambio.'; error.hidden = false; return; }
-      }
+      if (author) data.author = state.user.name;
       state.submitting = true;
       error.hidden = true;
       submit.textContent = 'Guardando…';
@@ -527,9 +681,11 @@
       try {
         await handler(data, form);
       } catch (failure) {
-        error.textContent = failure.message;
-        error.hidden = false;
-        error.scrollIntoView({ block: 'nearest' });
+        if (!failure.authExpired && state.authenticated) {
+          error.textContent = failure.message;
+          error.hidden = false;
+          error.scrollIntoView({ block: 'nearest' });
+        }
       } finally {
         state.submitting = false;
         submit.textContent = submitLabel;
@@ -542,42 +698,21 @@
     return form;
   }
 
-  function persistActor(name) {
-    state.actor = name.trim();
-    try { localStorage.setItem('mario-casos-actor', state.actor); } catch (_) { /* The name still works for this session. */ }
-    updateActor();
-  }
-
-  function openActorForm() {
-    const form = createForm('¿Quién está registrando?', 'Guardar nombre', async data => {
-      const name = text(data.name).trim();
-      if (!name) throw new Error('Escribe tu nombre.');
-      persistActor(name);
-      $('#form-dialog').close();
-      const next = resumeAction;
-      resumeAction = null;
-      state.submitting = false;
-      if (next) next();
-      else notify('Tu nombre está listo para los próximos registros.');
-    }, { author: false, intro: 'Cada registro deja constancia de quién lo realizó. Este nombre se guarda en este navegador; puedes cambiarlo cuando lo necesites.' });
-    if (!form) return;
-    field(form, 'name', 'Tu nombre', { required: true, value: state.actor, full: true, maxLength: 120, autocomplete: 'name', placeholder: 'Nombre de quien registra' }).focus();
-  }
-
   async function afterMutation(message, caseId = null, closeForm = true) {
+    if (!state.authenticated) return;
     if (closeForm) $('#form-dialog').close();
     notify(message);
     const synced = await loadData({ quiet: true, refreshDetail: false });
+    if (!state.authenticated) return;
     if (!synced) syncWarning('El cambio se guardó, pero no pudimos actualizar la lista. Reintenta para ver la versión reciente.');
     if (caseId !== null && state.detailId === caseId && $('#case-dialog').open && !$('#form-dialog').open) await refreshCase();
   }
 
   function openCaseForm(item = null) {
     const form = createForm(item ? 'Editar caso' : 'Registrar nuevo caso', item ? 'Guardar cambios' : 'Crear caso', async data => {
-      if (data.author !== state.actor) persistActor(data.author);
       const created = await request(item ? `/api/cases/${item.id}` : '/api/cases', { method: item ? 'PATCH' : 'POST', body: JSON.stringify(data) });
       await afterMutation(item ? 'Los datos del caso se actualizaron.' : 'Caso registrado. Ya puedes agregar actuados y tareas.', item?.id ?? null);
-      if (!item) await openCase(created.id);
+      if (!item && state.authenticated) await openCase(created.id);
     });
     if (!form) return;
     const values = item || {};
@@ -595,7 +730,6 @@
 
   function openActivityForm(item) {
     const form = createForm('Registrar actuado', 'Guardar actuado', async data => {
-      if (data.author !== state.actor) persistActor(data.author);
       await request(`/api/cases/${item.id}/activities`, { method: 'POST', body: JSON.stringify(data) });
       state.detailTab = 'actuados';
       await afterMutation('Actuado registrado en el historial del caso.', item.id);
@@ -609,7 +743,6 @@
 
   function openTaskForm(task = null, caseId = null) {
     const form = createForm(task ? 'Editar tarea' : 'Agregar tarea pendiente', task ? 'Guardar cambios' : 'Crear tarea', async data => {
-      if (data.author !== state.actor) persistActor(data.author);
       if (!task) data.case_id = data.case_id ? Number(data.case_id) : null;
       await request(task ? `/api/tasks/${task.id}` : '/api/tasks', { method: task ? 'PATCH' : 'POST', body: JSON.stringify(data) });
       await afterMutation(task ? 'La tarea se actualizó.' : 'Tarea agregada a los pendientes del equipo.', task?.case_id ?? data.case_id ?? null);
@@ -636,10 +769,10 @@
         await request(`/api/tasks/${task.id}`, { method: 'PATCH', body: JSON.stringify({ status, author: state.actor }) });
         await afterMutation({ completada: 'Tarea completada. Un pendiente menos.', en_curso: 'Tarea marcada en curso.', pendiente: 'Tarea marcada como pendiente.' }[status], task.case_id ?? null, false);
       } catch (error) {
-        notify(error.message, true);
+        if (!error.authExpired && state.authenticated) notify(error.message, true);
       } finally {
         state.taskBusy.delete(task.id);
-        renderMain();
+        if (state.authenticated) renderMain();
         if (state.detail && $('#case-dialog').open) renderCaseDetail();
       }
     });
@@ -655,8 +788,8 @@
       body.append('file', file);
       body.append('author', data.author);
       const report = await request('/api/import', { method: 'POST', body });
-      if (data.author !== state.actor) persistActor(data.author);
       await afterMutation(report.already_imported ? 'Este archivo ya estaba importado. No se duplicaron registros.' : `Importación completada: ${report.cases_created ?? 0} casos, ${report.tasks_created ?? 0} tareas y ${report.activities_created ?? 0} actuados.`);
+      if (!state.authenticated) return;
       const omissions = (report.skipped_rows || []).filter(item => !/encabezado|título|sección/.test(text(item.reason)));
       if (omissions.length || report.identity_issues?.length) {
         setView('resumen');
@@ -667,13 +800,151 @@
     field(form, 'file', 'Archivo Excel', { type: 'file', required: true, accept: '.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', full: true });
   }
 
+  function openPasswordForm() {
+    const form = createForm('Cambiar mi contraseña', 'Cambiar contraseña', async data => {
+      if (data.new_password !== data.confirm_password) throw new Error('La nueva contraseña y su confirmación deben coincidir.');
+      const session = await request('/api/auth/change-password', { method: 'POST', body: JSON.stringify({ current_password: data.current_password, new_password: data.new_password }) });
+      $('#form-dialog').close();
+      if (applySession(session)) {
+        notify('Tu contraseña se cambió. Las otras sesiones de tu cuenta se cerraron.');
+        await loadData({ quiet: true });
+      }
+    }, { author: false, intro: 'Elige una contraseña de al menos 10 caracteres. El cambio cerrará las otras sesiones abiertas de tu cuenta.' });
+    if (!form) return;
+    field(form, 'current_password', 'Contraseña actual', { type: 'password', required: true, full: true, autocomplete: 'current-password', maxLength: 1024 });
+    field(form, 'new_password', 'Nueva contraseña', { type: 'password', required: true, full: true, minLength: 10, autocomplete: 'new-password', maxLength: 1024 });
+    field(form, 'confirm_password', 'Repite la nueva contraseña', { type: 'password', required: true, full: true, minLength: 10, autocomplete: 'new-password', maxLength: 1024 });
+  }
+
+  async function loadUsers() {
+    if (!state.authenticated || state.user?.role !== 'admin' || state.usersLoading) return;
+    const revision = state.authRevision;
+    state.usersLoading = true;
+    $('#users-status').textContent = 'Actualizando usuarios…';
+    $('#users-status').hidden = false;
+    try {
+      const users = await request('/api/users');
+      if (!state.authenticated || state.user?.role !== 'admin' || revision !== state.authRevision) return;
+      state.users = Array.isArray(users) ? users : [];
+      renderUsers();
+    } catch (error) {
+      if (error.authExpired || !state.authenticated || revision !== state.authRevision) return;
+      $('#users-status').textContent = error.message;
+    } finally {
+      state.usersLoading = false;
+    }
+  }
+
+  function renderUsers() {
+    $('#user-count').textContent = state.users.length;
+    $('#users-status').hidden = state.users.length > 0;
+    $('#users-status').textContent = state.users.length ? '' : 'No hay usuarios para mostrar.';
+    $('#users-table-body').replaceChildren(...state.users.map(user => {
+      const row = node('tr');
+      const name = node('td');
+      name.append(node('span', 'user-name', user.name), node('p', 'table-case-meta', `${user.username}${user.id === state.user.id ? ' · Tu cuenta' : ''}`));
+      const role = node('td');
+      role.append(badge(user.role === 'admin' ? 'Administrador' : 'Equipo', user.role === 'admin' ? 'progress' : ''));
+      const status = node('td');
+      status.append(badge(user.active ? 'Activo' : 'Desactivado', user.active ? '' : 'closed'));
+      const actions = node('td', 'user-actions');
+      actions.append(actionButton('Editar', 'button secondary tiny', () => openUserForm(user)), actionButton('Restablecer contraseña', 'text-button', () => openResetPasswordForm(user)));
+      row.append(name, role, status, actions);
+      return row;
+    }));
+  }
+
+  function openUserForm(user = null) {
+    if (state.user?.role !== 'admin') return;
+    const form = createForm(user ? 'Editar usuario' : 'Agregar usuario al equipo', user ? 'Guardar cambios' : 'Crear usuario', async (data, activeForm) => {
+      const payload = user ? { name: data.name, role: data.role, active: $('#field-active', activeForm).checked } : { username: data.username, name: data.name, role: data.role, password: data.password };
+      await request(user ? `/api/users/${user.id}` : '/api/users', { method: user ? 'PATCH' : 'POST', body: JSON.stringify(payload) });
+      $('#form-dialog').close();
+      if (user?.id === state.user.id) {
+        const stillAuthenticated = await loadSession({ loadWorkspace: false });
+        if (!stillAuthenticated) return;
+      }
+      if (state.authenticated) {
+        notify(user ? 'Usuario actualizado.' : 'Usuario creado. Ya puede acceder al espacio.');
+        await loadUsers();
+      }
+    }, { author: false, intro: user ? `Cuenta: ${user.username}. Los cambios de permisos cierran las sesiones abiertas de esa persona.` : 'Los miembros del equipo pueden consultar y registrar casos, actuados y tareas. Los administradores también gestionan los usuarios.' });
+    if (!form) return;
+    if (!user) {
+      const username = field(form, 'username', 'Usuario para iniciar sesión', { required: true, full: true, minLength: 3, maxLength: 64, autocomplete: 'off', hint: 'De 3 a 64 caracteres: empieza con letra o número y usa letras sin tildes, números, punto, guion o guion bajo.' });
+      username.pattern = '[A-Za-z0-9][A-Za-z0-9._-]{2,63}';
+      username.spellcheck = false;
+      username.autocapitalize = 'none';
+    }
+    field(form, 'name', 'Nombre de la persona', { required: true, full: true, value: user?.name, maxLength: 150, autocomplete: 'off', hint: 'Este nombre aparecerá en los registros que realice.' });
+    field(form, 'role', 'Permisos', { required: true, full: true, choices: [['editor', 'Equipo: consultar y registrar'], ['admin', 'Administrador: gestionar también usuarios']], value: user?.role || 'editor' });
+    if (user) {
+      const wrap = node('div', 'form-field full checkbox-field');
+      const input = node('input');
+      input.type = 'checkbox';
+      input.id = 'field-active';
+      input.name = 'active';
+      input.checked = Boolean(user.active);
+      input.disabled = user.id === state.user.id;
+      const label = node('label', '', 'Cuenta activa: puede acceder al espacio');
+      label.htmlFor = input.id;
+      wrap.append(input, label);
+      $('.form-fields', form).append(wrap);
+    } else field(form, 'password', 'Contraseña inicial', { type: 'password', required: true, full: true, minLength: 10, maxLength: 1024, autocomplete: 'new-password', hint: 'Al menos 10 caracteres. La persona puede cambiarla al iniciar sesión.' });
+  }
+
+  function openResetPasswordForm(user) {
+    if (state.user?.role !== 'admin') return;
+    const form = createForm('Restablecer contraseña', 'Restablecer contraseña', async data => {
+      if (data.password !== data.confirm_password) throw new Error('La contraseña y su confirmación deben coincidir.');
+      const ownAccount = user.id === state.user.id;
+      await request(`/api/users/${user.id}/reset-password`, { method: 'POST', body: JSON.stringify({ password: data.password }) });
+      $('#form-dialog').close();
+      if (ownAccount) { await loadSession({ loadWorkspace: false }); return; }
+      notify('Contraseña restablecida. Las sesiones de esa cuenta se cerraron.');
+      await loadUsers();
+    }, { author: false, intro: `Cuenta: ${user.username} (${user.name}). Se cerrarán todas las sesiones de esta cuenta${user.id === state.user.id ? ', incluida tu sesión actual' : ''}.` });
+    if (!form) return;
+    field(form, 'password', 'Nueva contraseña', { type: 'password', required: true, full: true, minLength: 10, maxLength: 1024, autocomplete: 'new-password' });
+    field(form, 'confirm_password', 'Repite la nueva contraseña', { type: 'password', required: true, full: true, minLength: 10, maxLength: 1024, autocomplete: 'new-password' });
+  }
+
+  async function downloadCSV(link) {
+    if (!state.authenticated || link.dataset.busy === 'true') return;
+    link.dataset.busy = 'true';
+    link.setAttribute('aria-disabled', 'true');
+    try {
+      const file = await request(link.getAttribute('href'), { responseFormat: 'blob' });
+      if (!state.authenticated) return;
+      const url = URL.createObjectURL(file);
+      const download = node('a');
+      download.href = url;
+      download.download = link.getAttribute('href').split('/').pop();
+      document.body.append(download);
+      download.click();
+      download.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (error) {
+      if (!error.authExpired && state.authenticated) notify(error.message, true);
+    } finally {
+      delete link.dataset.busy;
+      link.removeAttribute('aria-disabled');
+    }
+  }
+
   function wireEvents() {
     $$('.nav-item').forEach(button => button.addEventListener('click', () => setView(button.dataset.view)));
     $$('[data-go]').forEach(button => button.addEventListener('click', () => setView(button.dataset.go)));
     $$('[data-new-task]').forEach(button => button.addEventListener('click', () => requireActor(() => openTaskForm())));
     $('#new-case-button').addEventListener('click', () => requireActor(() => openCaseForm()));
     $('#import-button').addEventListener('click', () => requireActor(openImportForm));
-    $('#actor-button').addEventListener('click', () => { resumeAction = null; openActorForm(); });
+    $('#login-form').addEventListener('submit', login);
+    $('#auth-retry').addEventListener('click', () => loadSession());
+    $('#logout-button').addEventListener('click', logout);
+    $('#change-password-button').addEventListener('click', openPasswordForm);
+    $('#new-user-button').addEventListener('click', () => openUserForm());
+    $('#users-retry').addEventListener('click', loadUsers);
+    $$('a.export-button').forEach(link => link.addEventListener('click', event => { event.preventDefault(); downloadCSV(link); }));
     $('#retry-button').addEventListener('click', () => loadData());
     $('#case-search').addEventListener('input', renderCases);
     $('#case-status').addEventListener('change', renderCases);
@@ -684,7 +955,7 @@
     $$('[data-close]').forEach(button => button.addEventListener('click', () => { if (!state.submitting) document.getElementById(button.dataset.close).close(); }));
     $('#case-dialog').addEventListener('close', () => { state.detailId = null; state.detail = null; state.detailRequest++; });
     $('#form-dialog').addEventListener('cancel', event => { if (state.submitting) event.preventDefault(); });
-    $('#form-dialog').addEventListener('close', () => { resumeAction = null; });
+    $('#form-dialog').addEventListener('close', () => { $$('input[type="password"]', $('#form-dialog')).forEach(input => { input.value = ''; }); });
     $('#copy-link-button').addEventListener('click', async () => {
       const url = `${location.origin}${location.pathname}`;
       try {
@@ -705,17 +976,17 @@
       } catch (_) { notify('No se pudo copiar. Puedes compartir la dirección de esta página desde tu navegador.', true); }
     });
     window.addEventListener('hashchange', () => setView(location.hash.slice(1)));
-    window.addEventListener('focus', () => { if (!state.submitting) loadData({ quiet: true }); });
-    window.addEventListener('online', () => loadData({ quiet: true }));
-    window.addEventListener('storage', event => {
-      if (event.key === 'mario-casos-actor') { state.actor = event.newValue || ''; updateActor(); }
-    });
-    setInterval(() => { if (!document.hidden && !state.submitting) loadData({ quiet: true }); }, 30000);
+    const refresh = () => {
+      if (state.submitting || !state.authenticated) return;
+      loadData({ quiet: true });
+      if (state.view === 'usuarios') loadUsers();
+    };
+    window.addEventListener('focus', refresh);
+    window.addEventListener('online', refresh);
+    setInterval(() => { if (!document.hidden) refresh(); }, 30000);
   }
 
-  try { state.actor = localStorage.getItem('mario-casos-actor') || ''; } catch (_) { state.actor = ''; }
-  updateActor();
   wireEvents();
   setView(location.hash.slice(1));
-  loadData();
+  loadSession();
 })();

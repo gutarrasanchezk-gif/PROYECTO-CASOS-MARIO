@@ -1,0 +1,22 @@
+:root {font-family:system-ui,-apple-system,"Segoe UI",sans-serif;color:#24343c;background:#f7f8f5;line-height:1.65}
+* {box-sizing:border-box}
+body {margin:0}
+header {background:#182e37;color:white;padding:22px max(22px,calc((100vw - 900px)/2));display:flex;justify-content:space-between;gap:20px}
+header a {color:white;font-size:20px;text-decoration:none;font-weight:700}
+header span {font-size:13px;align-self:center;color:#c9ded8}
+main {max-width:900px;padding:48px 22px 70px;margin:auto}
+h1 {font-size:clamp(28px,4vw,42px);letter-spacing:-1px;line-height:1.2;margin:8px 0 16px}
+h2 {font-size:22px;line-height:1.35;margin:0 0 18px}
+.eyebrow {color:#176a62;font-size:12px;font-weight:700;letter-spacing:2px}
+.intro {font-size:18px;color:#5d6e74;margin-bottom:30px}
+section {padding:28px;background:white;border:1px solid #e5e9e4;border-radius:14px;margin:22px 0}
+li {padding-left:6px;margin:10px 0}
+p {margin:16px 0 0}
+ol {padding-left:22px}
+a {color:#176a62;overflow-wrap:anywhere}
+pre {overflow-x:auto;padding:16px;background:#f1f5f2;border-radius:8px;font-size:13px;white-space:pre-wrap;overflow-wrap:anywhere}
+code {font-family:ui-monospace,SFMono-Regular,Consolas,monospace}
+.actions {display:flex;align-items:center;gap:22px;flex-wrap:wrap;margin-top:28px}
+.primary {display:inline-block;background:#176a62;color:white;padding:12px 18px;border-radius:8px;font-weight:600;text-decoration:none}
+a:focus-visible {outline:3px solid #58b3a5;outline-offset:4px}
+@media(max-width:600px) {header {padding:18px 20px}header span {max-width:105px;text-align:right}main {padding-top:32px}section {padding:21px}.intro {font-size:16px}}
